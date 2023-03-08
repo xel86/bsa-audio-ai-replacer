@@ -115,5 +115,6 @@ def main():
             break
 
         pbar.set_description(f"({filename}) Generating lip file")
+        generate_lip_file(filename, text, output_folder)
 
 main()
