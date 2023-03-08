@@ -1,10 +1,12 @@
 import sys
 import os
-from typing import List, Tuple
-from collections import namedtuple
+import io
 import requests
 import json
+from typing import List, Tuple, Dict
+from collections import namedtuple
 from tqdm import tqdm
+from pydub import AudioSegment
 
 # file name, dialogue text
 DialogueLine = Tuple[str, str]
@@ -36,13 +38,7 @@ def parse_exported_dialogue_file(path: str, esp_name: str = '') -> List[Dialogue
 
     return lines
 
-url = "https://api.elevenlabs.io/v1/text-to-speech/<voice_id>"
-headers = {
-  'xi-api-key': '<key>',
-  'Content-Type': 'application/json'
-}
-
-def get_voice_file_for_line(filename: str, text: str, output_folder: str):
+def get_voice_file_for_line(url: str, headers: Dict[str, str], filename: str, text: str, output_folder: str):
     payload = json.dumps({
         "text": text,
         "voice_settings": {
@@ -53,8 +49,19 @@ def get_voice_file_for_line(filename: str, text: str, output_folder: str):
 
     response = requests.request("POST", url, headers=headers, data=payload)
     no_ext = os.path.splitext(filename)[0]
-    with open(f"{output_folder}/{no_ext}.wav", "wb") as f:
-        f.write(response.content)
+    output_path = f"{output_folder}/{no_ext}" 
+
+    # Elevenlabs returns an mp3 file in raw bytes
+    # Convert it into wav in-memory
+    audio = AudioSegment.from_file(io.BytesIO(response.content), format="mp3")
+
+    # Bethesda audio files have to be 16-bit WAV files, Mono, and at 44100Hz.
+    audio.set_channels(1)
+    audio.set_frame_rate(44100)
+    audio.set_sample_width(2)
+
+    audio.export(f"{output_path}.wav", format="wav")
+
 
 def main():
     if len(sys.argv) > 1:
@@ -62,12 +69,29 @@ def main():
     else:
         esp_name = ""
     
-    output_folder = f"./ai_dialogue"
+    if "ELEVENLABS_VOICEID" in os.environ and "ELEVENLABS_KEY" in os.environ:
+        voice_id = os.getenv("ELEVENLABS_VOICEID") 
+        api_key = os.getenv("ELEVENLABS_KEY")
+
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+        headers = {
+            'xi-api-key': api_key,
+            'Content-Type': 'application/json'
+        }
+    else:
+        print("To use the elevenlabs API you must provide the voice_id and xi-api-key. Set the env variables ELEVENLABS_VOICEID and ELEVENLABS_KEY accordingly.")
+        return
+    
+    output_folder = f"./generated"
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
     lines = parse_exported_dialogue_file("export.txt", esp_name)
     for filename, text in tqdm(lines, ascii=True):
-        get_voice_file_for_line(filename, text, output_folder)
+        # Don't regenerated a voice file if it already exists
+        if os.path.exists(f"{output_folder}/{filename}"):
+            continue
+
+        get_voice_file_for_line(url, headers, filename, text, output_folder)
 
 main()
