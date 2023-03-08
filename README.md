@@ -1,8 +1,7 @@
 # bsa-audio-ai-replacer
-wip script to automate replacing mod dialogue with ai generated voice from elevenlabs.
+wip script to automate replacing mod dialogue with AI generated voice from Elevenlabs.
 
 This script generates .wav files from an elevenlabs generated voice with the original file name so its incredibly easily to replace & overwrite.
-
 
 In the CreationKit you can select a NPC's voice and "Export dialogue" which gives you a formatted text file with lots of information but most importantly the original voice .wav file name and the actual text to be spoken.
 
