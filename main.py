@@ -3,6 +3,7 @@ import os
 import io
 import requests
 import json
+import subprocess
 from typing import List, Tuple, Dict
 from collections import namedtuple
 from tqdm import tqdm
@@ -38,7 +39,9 @@ def parse_exported_dialogue_file(path: str, esp_name: str = '') -> List[Dialogue
 
     return lines
 
-def get_voice_file_for_line(url: str, headers: Dict[str, str], filename: str, text: str, output_folder: str):
+# Returns true when successfully downloads and converts file.
+# Returns false when download failed, most likely due to running out of credits.
+def get_voice_file_for_line(url: str, headers: Dict[str, str], filename: str, text: str, output_folder: str) -> bool:
     payload = json.dumps({
         "text": text,
         "voice_settings": {
@@ -48,8 +51,11 @@ def get_voice_file_for_line(url: str, headers: Dict[str, str], filename: str, te
     })
 
     response = requests.request("POST", url, headers=headers, data=payload)
-    no_ext = os.path.splitext(filename)[0]
-    output_path = f"{output_folder}/{no_ext}" 
+    if response.status_code != 200:
+        print(f"Error received from Elevenlabs API, most likely ran out of credits. Proceeding with what we have.")
+        return False
+
+    output_path = f"{output_folder}/{filename}" 
 
     # Elevenlabs returns an mp3 file in raw bytes
     # Convert it into wav in-memory
@@ -60,8 +66,15 @@ def get_voice_file_for_line(url: str, headers: Dict[str, str], filename: str, te
     audio.set_frame_rate(44100)
     audio.set_sample_width(2)
 
-    audio.export(f"{output_path}.wav", format="wav")
+    audio.export(output_path, format="wav")
 
+# Currently the best method I can find to generate lip files is to use FaceFXWrapper externally.
+# Users will have to download on their own and drag the exe and FonixData.cdf into this folder.
+def generate_lip_file(filename: str, text: str, output_folder: str):
+    no_ext = os.path.splitext(filename)[0]
+    process = subprocess.run([".\\FaceFXWrapper.exe", "Skyrim", "USEnglish", "FonixData.cdf", f"{output_folder}/{no_ext}.wav", f"{output_folder}/{no_ext}.lip", text], stdout=subprocess.DEVNULL)
+    if process.returncode != 0:
+        print(f"FaceFXWrapper returned error result when attempting to generate lip file for: {filename}")
 
 def main():
     if len(sys.argv) > 1:
@@ -87,11 +100,20 @@ def main():
         os.makedirs(output_folder)
 
     lines = parse_exported_dialogue_file("export.txt", esp_name)
-    for filename, text in tqdm(lines, ascii=True):
+
+    pbar = tqdm(lines, ascii=True)
+    for filename, text in pbar:
         # Don't regenerated a voice file if it already exists
         if os.path.exists(f"{output_folder}/{filename}"):
             continue
 
-        get_voice_file_for_line(url, headers, filename, text, output_folder)
+        pbar.set_description(f"({filename}) Generating voice file")
+        res = get_voice_file_for_line(url, headers, filename, text, output_folder)
+
+        # If the API failed before we finished downloading everything, break.
+        if res == False:
+            break
+
+        pbar.set_description(f"({filename}) Generating lip file")
 
 main()
